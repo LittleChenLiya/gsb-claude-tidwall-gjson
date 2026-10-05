@@ -128,6 +128,51 @@ string, for JSON string literals
 nil, for JSON null
 ```
 
+## Query reports
+
+`Query` is an optional companion to `Get` (which is unchanged). It returns
+a `QueryReport` describing every matched value with a canonical path that
+points back into the original JSON, so editors can highlight the exact
+source range of each hit.
+
+```go
+json := `{"users":[{"name":"Ann","active":true},{"name":"Bob","active":false},{"name":"Cid","active":true}]}`
+report := gjson.Query(json, "users.#(active==true)#.name")
+for _, e := range report.Entries {
+	fmt.Println(e.Path, e.Kind, e.Start, e.End, e.Result.Raw)
+}
+// Output:
+// users.0.name Hit 18 23 "Ann"
+// users.2.name Hit 77 82 "Cid"
+```
+
+Each `ReportEntry` has a `Kind`:
+
+- `EntryHit` — value found in the original JSON; `Start`/`End` are its
+  exact byte range.
+- `EntryNull` — an explicit JSON `null`, reported separately from a
+  missing path, also with its source range.
+- `EntryMissing` — the path did not match; no source range.
+- `EntryDerived` — a value synthesized by a modifier, a `#` count, a pipe
+  or a multipath subselector. Derived entries have no source position:
+  `Start`/`End` are `-1` and no index is fabricated.
+
+Path and range semantics:
+
+- Array filters and multi-result queries report one entry per matched
+  element, and `Path` keeps the element's actual array index.
+- For an unfiltered `#.tail` projection, array elements that were skipped
+  because `tail` did not exist are null-filled as `EntryMissing` entries
+  with their actual array index. Elements excluded by a `#(...)#` filter
+  are not reported.
+- `Path` escapes `.`, `"` and `\` (and other special characters) with a
+  backslash, the same format as `Escape`, so `Get(json, entry.Path)`
+  queries back to the same original value. A key `a.b` reports as `a\.b`,
+  which differs from the nested path `a.b`.
+- Duplicate object keys resolve to the first occurrence when a path is
+  re-queried; entries located under a repeated key are flagged with
+  `Duplicate`.
+
 To directly access the value:
 
 ```go
