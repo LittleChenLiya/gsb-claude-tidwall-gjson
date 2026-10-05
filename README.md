@@ -269,6 +269,74 @@ gjson.AddModifier("case", func(json, arg string) string {
 "children|@case:lower|@reverse"  >> ["jack","alex","sara"]
 ```
 
+## Explicit query projections
+
+A `Projection` is an explicitly registered column plan over one JSON array.
+The query runs once along the truly matching records and every registered
+field path is bound to the **same** matched record in that single pass.
+Columns are never filtered independently and then stitched back together by
+position. A field missing from a record stays missing (distinct from an
+explicit `null`) and keeps the owning record's index; filtering preserves the
+original array ordinal. Modifier columns are reported as derived and tagged
+with the modifier source, and a derived value never borrows a position from
+the original text. The source document is never modified, and output columns
+follow the registration order.
+
+```go
+package main
+
+import (
+	"fmt"
+	"strings"
+	"github.com/tidwall/gjson"
+)
+
+func main() {
+	gjson.AddModifier("upper", func(json, arg string) string {
+		r := gjson.Parse(json)
+		if r.Type != gjson.String {
+			return "null"
+		}
+		return `"` + strings.ToUpper(r.String()) + `"`
+	})
+
+	const json = `{"users":[
+		{"id":1,"name":"alice","active":true},
+		{"id":2,"active":true}
+	]}`
+
+	p := gjson.Projection{
+		Path:  "users",
+		Where: "active==true",
+		Columns: []gjson.ProjectionColumn{
+			{Name: "id", Field: "id"},
+			{Name: "name", Field: "name"},
+			{Name: "name_upper", Field: "name", Modifier: "upper"},
+		},
+	}
+	rows, _ := p.Run(json)
+	fmt.Println(p.JSON(rows))
+}
+```
+
+This prints the projection of all matched records. The two output lines below
+show, per record, the direct field projection (`id`, `name`) and the derived
+projection (`name_upper`, tagged with its `upper` modifier source). Row 2
+keeps original array ordinal `1` after the `active` filter, and its missing
+`name` renders as `null`; an explicit `"name":null` is distinguishable on the
+`ProjectionCell`, where `Missing` stays `false`:
+
+```
+[{"id":1,"name":"alice","name_upper":"ALICE"}]
+[{"id":2,"name":null,"name_upper":null}]
+```
+
+Run the focused, deterministic tests for this feature with:
+
+```sh
+go test -run 'TestProjection|ExampleProjection' -v .
+```
+
 ## JSON Lines
 
 There's support for [JSON Lines](http://jsonlines.org/) using the `..` prefix, which treats a multilined document as an array. 
